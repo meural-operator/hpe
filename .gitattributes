@@ -1,0 +1,26 @@
+# ============================================================================
+# Git LFS tracking rules for HPE Repository
+# ============================================================================
+# PyTorch checkpoint files (~201MB each) are tracked via Git LFS.
+# Also covers PDF, images, and other large binary formats.
+# ============================================================================
+
+# PyTorch model weights
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.ckpt filter=lfs diff=lfs merge=lfs -text
+
+# Other ML model formats
+*.h5 filter=lfs diff=lfs merge=lfs -text
+*.hdf5 filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.npz filter=lfs diff=lfs merge=lfs -text
+
+# PDF files (paper output)
+*.pdf filter=lfs diff=lfs merge=lfs -text
+
+# Image files
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text

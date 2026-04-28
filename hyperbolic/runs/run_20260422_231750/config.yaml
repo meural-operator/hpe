@@ -1,0 +1,29 @@
+# Hyperbolic Kinematic Phase-Space Attention HPE v2
+# Uses shared H36M data from MotionAGFormer
+
+# Training
+learning_rate: 0.0001
+batch_size: 16
+weight_decay: 0.01
+lr_decay: 0.99
+epochs: 60
+
+# Model
+embed_dim: 512
+num_spatial: 3
+num_temporal: 3
+temporal_window: 3
+mlp_ratio: 4
+dropout: 0.1
+
+# Data
+data_root: C:/Users/DIAT/ashish/hpe/steins_shrinkage/MotionAGFormer/data/motion3d/
+subset_list: [ H36M-243 ]
+num_joints: 17
+root_rel: True
+add_velocity: False
+n_frames: 243
+
+# Augmentation
+use_proj_as_2d: False
+flip: True

@@ -1,0 +1,109 @@
+2026-04-22 23:17:51 | INFO    | Config saved → runs\run_20260422_231750\config.yaml
+2026-04-22 23:17:51 | INFO    | GPU: NVIDIA RTX 4000 Ada Generation | PyTorch 2.10.0+cu130 | CUDA 13.0
+2026-04-22 23:17:51 | INFO    | Source mirrored → runs\run_20260422_231750\src
+2026-04-22 23:17:51 | INFO    | Run directory : runs\run_20260422_231750
+2026-04-22 23:17:51 | INFO    | Device        : cuda
+2026-04-22 23:18:01 | INFO    | HyperbolicHPE v2 | Parameters: 17,605,641
+2026-04-22 23:18:01 | INFO    | Epochs: 0 → 59 | LR: 1.00e-04 | Batch: 16
+2026-04-23 03:20:31 | INFO    | Epoch 000/59 | Loss -0.0315 | MPJPE 84.5mm | Vel 0.0120 | Bone 0.0195 | Drift(log10) 5.37 | Eval 64.7mm | Best 64.7mm | LR 9.90e-05 | 14550.3s ★ NEW BEST
+2026-04-23 03:20:31 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0647)
+2026-04-23 07:13:57 | INFO    | Epoch 001/59 | Loss -0.2123 | MPJPE 69.1mm | Vel 0.0052 | Bone 0.0155 | Drift(log10) 5.36 | Eval 63.0mm | Best 63.0mm | LR 9.80e-05 | 14005.7s ★ NEW BEST
+2026-04-23 10:04:30 | INFO    | Resuming from runs\run_20260422_231750
+2026-04-23 10:04:31 | INFO    | Loaded checkpoint_latest.pth  (epoch 0)
+2026-04-23 10:04:31 | INFO    | Resuming from epoch 1 | best_mpjpe=0.0647
+2026-04-23 10:04:31 | INFO    | Run directory : runs\run_20260422_231750
+2026-04-23 10:04:31 | INFO    | Device        : cuda
+2026-04-23 10:04:49 | INFO    | Model / optimizer / loss-weighter states restored.
+2026-04-23 10:04:49 | INFO    | HyperbolicHPE v2 | Parameters: 17,605,641
+2026-04-23 10:04:49 | INFO    | Epochs: 1 → 59 | LR: 9.90e-05 | Batch: 16
+2026-04-23 10:04:49 | INFO    | AMP: bfloat16  |  GradScaler: enabled
+2026-04-23 12:01:35 | INFO    | Epoch 001/59 | Loss -0.2118 | MPJPE 69.5mm | Vel 0.0052 | Bone 0.0156 | Drift(log10) 5.36 | Eval 63.4mm | Best 63.4mm | LR 9.80e-05 | 7006.6s ★ NEW BEST
+2026-04-23 12:01:37 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0634)
+2026-04-23 13:57:05 | INFO    | Epoch 002/59 | Loss -0.3734 | MPJPE 65.9mm | Vel 0.0046 | Bone 0.0149 | Drift(log10) 5.36 | Eval 61.5mm | Best 61.5mm | LR 9.70e-05 | 6928.2s ★ NEW BEST
+2026-04-23 13:57:05 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0615)
+2026-04-23 15:54:19 | INFO    | Epoch 003/59 | Loss -0.5287 | MPJPE 63.1mm | Vel 0.0044 | Bone 0.0145 | Drift(log10) 5.36 | Eval 61.0mm | Best 61.0mm | LR 9.61e-05 | 7033.9s ★ NEW BEST
+2026-04-23 15:54:21 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0610)
+2026-04-23 17:46:27 | INFO    | Epoch 004/59 | Loss -0.6816 | MPJPE 58.6mm | Vel 0.0041 | Bone 0.0142 | Drift(log10) 5.37 | Eval 60.9mm | Best 60.9mm | LR 9.51e-05 | 6726.4s ★ NEW BEST
+2026-04-23 17:46:28 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0609)
+2026-04-23 19:29:32 | INFO    | Epoch 005/59 | Loss -0.8278 | MPJPE 54.2mm | Vel 0.0039 | Bone 0.0135 | Drift(log10) 5.37 | Eval 56.5mm | Best 56.5mm | LR 9.41e-05 | 6184.7s ★ NEW BEST
+2026-04-23 19:29:33 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0565)
+2026-04-23 21:12:33 | INFO    | Epoch 006/59 | Loss -0.9701 | MPJPE 52.5mm | Vel 0.0038 | Bone 0.0132 | Drift(log10) 5.37 | Eval 56.2mm | Best 56.2mm | LR 9.32e-05 | 6180.6s ★ NEW BEST
+2026-04-23 21:12:34 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0562)
+2026-04-23 22:57:00 | INFO    | Epoch 007/59 | Loss -1.1074 | MPJPE 51.3mm | Vel 0.0037 | Bone 0.0128 | Drift(log10) 5.37 | Eval 58.7mm | Best 56.2mm | LR 9.23e-05 | 6266.5s
+2026-04-24 00:47:18 | INFO    | Epoch 008/59 | Loss -1.2422 | MPJPE 50.2mm | Vel 0.0037 | Bone 0.0126 | Drift(log10) 5.37 | Eval 56.6mm | Best 56.2mm | LR 9.14e-05 | 6617.0s
+2026-04-24 02:39:19 | INFO    | Epoch 009/59 | Loss -1.3739 | MPJPE 49.3mm | Vel 0.0037 | Bone 0.0125 | Drift(log10) 5.37 | Eval 55.5mm | Best 55.5mm | LR 9.04e-05 | 6720.4s ★ NEW BEST
+2026-04-24 02:39:20 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0555)
+2026-04-24 02:39:20 | INFO    |   ↳ Saved interval checkpoint: epoch_0010
+2026-04-24 04:30:31 | INFO    | Epoch 010/59 | Loss -1.5007 | MPJPE 49.2mm | Vel 0.0038 | Bone 0.0127 | Drift(log10) 5.37 | Eval 54.1mm | Best 54.1mm | LR 8.95e-05 | 6670.9s ★ NEW BEST
+2026-04-24 04:30:33 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0541)
+2026-04-24 06:37:09 | INFO    | Epoch 011/59 | Loss -1.6287 | MPJPE 47.8mm | Vel 0.0038 | Bone 0.0124 | Drift(log10) 5.37 | Eval 53.8mm | Best 53.8mm | LR 8.86e-05 | 7596.3s ★ NEW BEST
+2026-04-24 06:37:10 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0538)
+2026-04-24 08:34:44 | INFO    | Epoch 012/59 | Loss -1.7534 | MPJPE 47.1mm | Vel 0.0038 | Bone 0.0122 | Drift(log10) 5.37 | Eval 52.4mm | Best 52.4mm | LR 8.78e-05 | 7054.3s ★ NEW BEST
+2026-04-24 08:34:45 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0524)
+2026-04-24 10:31:30 | INFO    | Epoch 013/59 | Loss -1.8757 | MPJPE 45.9mm | Vel 0.0037 | Bone 0.0119 | Drift(log10) 5.36 | Eval 52.1mm | Best 52.1mm | LR 8.69e-05 | 7005.6s ★ NEW BEST
+2026-04-24 10:31:31 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0521)
+2026-04-24 12:32:44 | INFO    | Epoch 014/59 | Loss -1.9940 | MPJPE 45.5mm | Vel 0.0037 | Bone 0.0118 | Drift(log10) 5.36 | Eval 53.5mm | Best 52.1mm | LR 8.60e-05 | 7272.9s
+2026-04-24 14:32:11 | INFO    | Epoch 015/59 | Loss -2.1084 | MPJPE 45.4mm | Vel 0.0037 | Bone 0.0118 | Drift(log10) 5.35 | Eval 52.8mm | Best 52.1mm | LR 8.51e-05 | 7166.6s
+2026-04-24 16:20:56 | INFO    | Epoch 016/59 | Loss -2.2216 | MPJPE 44.8mm | Vel 0.0037 | Bone 0.0117 | Drift(log10) 5.35 | Eval 55.1mm | Best 52.1mm | LR 8.43e-05 | 6523.7s
+2026-04-24 18:09:07 | INFO    | Epoch 017/59 | Loss -2.3346 | MPJPE 43.8mm | Vel 0.0036 | Bone 0.0115 | Drift(log10) 5.34 | Eval 50.9mm | Best 50.9mm | LR 8.35e-05 | 6491.4s ★ NEW BEST
+2026-04-24 18:09:08 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0509)
+2026-04-24 20:33:36 | INFO    | Epoch 018/59 | Loss -2.4413 | MPJPE 44.0mm | Vel 0.0036 | Bone 0.0115 | Drift(log10) 5.34 | Eval 52.8mm | Best 50.9mm | LR 8.26e-05 | 8668.0s
+2026-04-24 22:58:35 | INFO    | Epoch 019/59 | Loss -2.5467 | MPJPE 43.3mm | Vel 0.0036 | Bone 0.0113 | Drift(log10) 5.34 | Eval 49.9mm | Best 49.9mm | LR 8.18e-05 | 8697.7s ★ NEW BEST
+2026-04-24 22:58:35 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0499)
+2026-04-24 22:58:37 | INFO    |   ↳ Saved interval checkpoint: epoch_0020
+2026-04-25 02:33:05 | INFO    | Epoch 020/59 | Loss -2.6527 | MPJPE 42.9mm | Vel 0.0036 | Bone 0.0112 | Drift(log10) 5.33 | Eval 51.1mm | Best 49.9mm | LR 8.10e-05 | 12868.7s
+2026-04-25 04:17:24 | INFO    | Epoch 021/59 | Loss -2.7576 | MPJPE 42.1mm | Vel 0.0036 | Bone 0.0111 | Drift(log10) 5.33 | Eval 53.9mm | Best 49.9mm | LR 8.02e-05 | 6258.2s
+2026-04-25 06:00:12 | INFO    | Epoch 022/59 | Loss -2.8571 | MPJPE 42.1mm | Vel 0.0036 | Bone 0.0111 | Drift(log10) 5.33 | Eval 51.4mm | Best 49.9mm | LR 7.94e-05 | 6167.5s
+2026-04-25 07:44:31 | INFO    | Epoch 023/59 | Loss -2.9511 | MPJPE 42.3mm | Vel 0.0036 | Bone 0.0110 | Drift(log10) 5.33 | Eval 50.7mm | Best 49.9mm | LR 7.86e-05 | 6259.4s
+2026-04-25 09:26:25 | INFO    | Epoch 024/59 | Loss -3.0489 | MPJPE 41.1mm | Vel 0.0035 | Bone 0.0108 | Drift(log10) 5.33 | Eval 50.5mm | Best 49.9mm | LR 7.78e-05 | 6113.3s
+2026-04-25 11:11:24 | INFO    | Epoch 025/59 | Loss -3.1436 | MPJPE 40.9mm | Vel 0.0035 | Bone 0.0107 | Drift(log10) 5.32 | Eval 51.9mm | Best 49.9mm | LR 7.70e-05 | 6298.9s
+2026-04-25 14:39:51 | INFO    | Epoch 026/59 | Loss -3.2334 | MPJPE 40.9mm | Vel 0.0035 | Bone 0.0107 | Drift(log10) 5.32 | Eval 54.8mm | Best 49.9mm | LR 7.62e-05 | 12506.4s
+2026-04-25 16:30:28 | INFO    | Epoch 027/59 | Loss -3.3265 | MPJPE 40.3mm | Vel 0.0035 | Bone 0.0106 | Drift(log10) 5.32 | Eval 49.9mm | Best 49.9mm | LR 7.55e-05 | 6636.6s
+2026-04-25 18:13:24 | INFO    | Epoch 028/59 | Loss -3.4153 | MPJPE 39.9mm | Vel 0.0035 | Bone 0.0105 | Drift(log10) 5.32 | Eval 49.8mm | Best 49.8mm | LR 7.47e-05 | 6175.6s ★ NEW BEST
+2026-04-25 18:13:25 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0498)
+2026-04-25 20:05:39 | INFO    | Epoch 029/59 | Loss -3.4881 | MPJPE 40.7mm | Vel 0.0037 | Bone 0.0107 | Drift(log10) 5.32 | Eval 49.7mm | Best 49.7mm | LR 7.40e-05 | 6733.1s ★ NEW BEST
+2026-04-25 20:05:40 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0497)
+2026-04-25 20:05:40 | INFO    |   ↳ Saved interval checkpoint: epoch_0030
+2026-04-25 22:02:13 | INFO    | Epoch 030/59 | Loss -3.5769 | MPJPE 39.6mm | Vel 0.0035 | Bone 0.0104 | Drift(log10) 5.32 | Eval 49.8mm | Best 49.7mm | LR 7.32e-05 | 6993.5s
+2026-04-26 00:08:06 | INFO    | Epoch 031/59 | Loss -3.6626 | MPJPE 39.0mm | Vel 0.0035 | Bone 0.0103 | Drift(log10) 5.32 | Eval 49.7mm | Best 49.7mm | LR 7.25e-05 | 7551.5s
+2026-04-26 02:23:41 | INFO    | Epoch 032/59 | Loss -3.7400 | MPJPE 38.8mm | Vel 0.0035 | Bone 0.0102 | Drift(log10) 5.32 | Eval 49.4mm | Best 49.4mm | LR 7.18e-05 | 8134.6s ★ NEW BEST
+2026-04-26 02:23:42 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0494)
+2026-04-26 04:09:30 | INFO    | Epoch 033/59 | Loss -3.8109 | MPJPE 38.7mm | Vel 0.0035 | Bone 0.0101 | Drift(log10) 5.32 | Eval 49.3mm | Best 49.3mm | LR 7.11e-05 | 6347.5s ★ NEW BEST
+2026-04-26 04:09:31 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0493)
+2026-04-26 05:56:37 | INFO    | Epoch 034/59 | Loss -3.8866 | MPJPE 38.2mm | Vel 0.0035 | Bone 0.0100 | Drift(log10) 5.32 | Eval 49.5mm | Best 49.3mm | LR 7.03e-05 | 6426.7s
+2026-04-26 07:43:42 | INFO    | Epoch 035/59 | Loss -3.9578 | MPJPE 37.9mm | Vel 0.0035 | Bone 0.0099 | Drift(log10) 5.32 | Eval 49.5mm | Best 49.3mm | LR 6.96e-05 | 6423.5s
+2026-04-26 09:27:36 | INFO    | Epoch 036/59 | Loss -4.0245 | MPJPE 37.8mm | Vel 0.0035 | Bone 0.0098 | Drift(log10) 5.32 | Eval 50.0mm | Best 49.3mm | LR 6.89e-05 | 6233.5s
+2026-04-26 11:13:49 | INFO    | Epoch 037/59 | Loss -4.0898 | MPJPE 37.7mm | Vel 0.0035 | Bone 0.0099 | Drift(log10) 5.32 | Eval 49.3mm | Best 49.3mm | LR 6.83e-05 | 6372.9s
+2026-04-26 13:15:25 | INFO    | Epoch 038/59 | Loss -4.1555 | MPJPE 37.4mm | Vel 0.0035 | Bone 0.0098 | Drift(log10) 5.32 | Eval 48.3mm | Best 48.3mm | LR 6.76e-05 | 7295.8s ★ NEW BEST
+2026-04-26 13:15:27 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0483)
+2026-04-26 15:02:59 | INFO    | Epoch 039/59 | Loss -4.2235 | MPJPE 36.8mm | Vel 0.0034 | Bone 0.0096 | Drift(log10) 5.32 | Eval 48.1mm | Best 48.1mm | LR 6.69e-05 | 6452.5s ★ NEW BEST
+2026-04-26 15:03:00 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0481)
+2026-04-26 15:03:00 | INFO    |   ↳ Saved interval checkpoint: epoch_0040
+2026-04-26 17:00:01 | INFO    | Epoch 040/59 | Loss -4.2801 | MPJPE 36.8mm | Vel 0.0034 | Bone 0.0095 | Drift(log10) 5.32 | Eval 49.4mm | Best 48.1mm | LR 6.62e-05 | 7020.4s
+2026-04-26 18:44:46 | INFO    | Epoch 041/59 | Loss -4.3332 | MPJPE 36.8mm | Vel 0.0034 | Bone 0.0095 | Drift(log10) 5.32 | Eval 49.6mm | Best 48.1mm | LR 6.56e-05 | 6284.2s
+2026-04-26 20:27:51 | INFO    | Epoch 042/59 | Loss -4.3994 | MPJPE 36.0mm | Vel 0.0034 | Bone 0.0094 | Drift(log10) 5.32 | Eval 49.1mm | Best 48.1mm | LR 6.49e-05 | 6184.4s
+2026-04-26 22:11:05 | INFO    | Epoch 043/59 | Loss -4.4484 | MPJPE 36.2mm | Vel 0.0034 | Bone 0.0093 | Drift(log10) 5.32 | Eval 47.9mm | Best 47.9mm | LR 6.43e-05 | 6193.5s ★ NEW BEST
+2026-04-26 22:11:06 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0479)
+2026-04-26 23:54:38 | INFO    | Epoch 044/59 | Loss -4.5061 | MPJPE 35.7mm | Vel 0.0034 | Bone 0.0092 | Drift(log10) 5.32 | Eval 49.8mm | Best 47.9mm | LR 6.36e-05 | 6211.9s
+2026-04-27 01:37:53 | INFO    | Epoch 045/59 | Loss -4.5613 | MPJPE 35.5mm | Vel 0.0033 | Bone 0.0091 | Drift(log10) 5.32 | Eval 48.8mm | Best 47.9mm | LR 6.30e-05 | 6194.6s
+2026-04-27 03:27:20 | INFO    | Epoch 046/59 | Loss -4.6069 | MPJPE 35.6mm | Vel 0.0033 | Bone 0.0091 | Drift(log10) 5.32 | Eval 49.8mm | Best 47.9mm | LR 6.24e-05 | 6566.4s
+2026-04-27 05:13:04 | INFO    | Epoch 047/59 | Loss -4.6554 | MPJPE 35.5mm | Vel 0.0033 | Bone 0.0090 | Drift(log10) 5.32 | Eval 47.7mm | Best 47.7mm | LR 6.17e-05 | 6343.5s ★ NEW BEST
+2026-04-27 05:13:05 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0477)
+2026-04-27 06:58:34 | INFO    | Epoch 048/59 | Loss -4.7133 | MPJPE 34.9mm | Vel 0.0032 | Bone 0.0088 | Drift(log10) 5.32 | Eval 47.8mm | Best 47.7mm | LR 6.11e-05 | 6329.9s
+2026-04-27 08:42:46 | INFO    | Epoch 049/59 | Loss -4.7532 | MPJPE 35.2mm | Vel 0.0032 | Bone 0.0088 | Drift(log10) 5.32 | Eval 49.0mm | Best 47.7mm | LR 6.05e-05 | 6251.3s
+2026-04-27 08:42:46 | INFO    |   ↳ Saved interval checkpoint: epoch_0050
+2026-04-27 10:25:46 | INFO    | Epoch 050/59 | Loss -4.8032 | MPJPE 34.8mm | Vel 0.0032 | Bone 0.0087 | Drift(log10) 5.32 | Eval 47.7mm | Best 47.7mm | LR 5.99e-05 | 6179.3s ★ NEW BEST
+2026-04-27 10:25:46 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0477)
+2026-04-27 12:12:04 | INFO    | Epoch 051/59 | Loss -4.8489 | MPJPE 34.8mm | Vel 0.0032 | Bone 0.0086 | Drift(log10) 5.32 | Eval 48.4mm | Best 47.7mm | LR 5.93e-05 | 6377.6s
+2026-04-27 14:03:39 | INFO    | Epoch 052/59 | Loss -4.8899 | MPJPE 34.8mm | Vel 0.0031 | Bone 0.0085 | Drift(log10) 5.32 | Eval 50.5mm | Best 47.7mm | LR 5.87e-05 | 6694.5s
+2026-04-27 15:51:23 | INFO    | Epoch 053/59 | Loss -4.9289 | MPJPE 34.9mm | Vel 0.0031 | Bone 0.0085 | Drift(log10) 5.32 | Eval 48.0mm | Best 47.7mm | LR 5.81e-05 | 6463.6s
+2026-04-27 17:48:00 | INFO    | Epoch 054/59 | Loss -4.9706 | MPJPE 34.7mm | Vel 0.0031 | Bone 0.0084 | Drift(log10) 5.32 | Eval 49.2mm | Best 47.7mm | LR 5.75e-05 | 6995.9s
+2026-04-27 19:41:20 | INFO    | Epoch 055/59 | Loss -5.0171 | MPJPE 34.4mm | Vel 0.0031 | Bone 0.0082 | Drift(log10) 5.32 | Eval 48.9mm | Best 47.7mm | LR 5.70e-05 | 6799.8s
+2026-04-27 21:24:53 | INFO    | Epoch 056/59 | Loss -5.0600 | MPJPE 34.2mm | Vel 0.0030 | Bone 0.0081 | Drift(log10) 5.32 | Eval 47.4mm | Best 47.4mm | LR 5.64e-05 | 6212.0s ★ NEW BEST
+2026-04-27 21:24:54 | INFO    |   ↳ Saved best checkpoint (eval_mpjpe=0.0474)
+2026-04-27 23:14:02 | INFO    | Epoch 057/59 | Loss -5.0930 | MPJPE 34.3mm | Vel 0.0030 | Bone 0.0081 | Drift(log10) 5.32 | Eval 48.6mm | Best 47.4mm | LR 5.58e-05 | 6548.1s
+2026-04-28 01:03:18 | INFO    | Epoch 058/59 | Loss -5.1268 | MPJPE 34.3mm | Vel 0.0030 | Bone 0.0080 | Drift(log10) 5.32 | Eval 48.8mm | Best 47.4mm | LR 5.53e-05 | 6555.3s
+2026-04-28 02:48:07 | INFO    | Epoch 059/59 | Loss -5.1680 | MPJPE 34.1mm | Vel 0.0029 | Bone 0.0079 | Drift(log10) 5.32 | Eval 48.6mm | Best 47.4mm | LR 5.47e-05 | 6288.7s
+2026-04-28 02:48:08 | INFO    |   ↳ Saved interval checkpoint: epoch_0060
+2026-04-28 02:48:08 | INFO    | Training complete. Best eval MPJPE: 0.0474
+2026-04-28 02:48:08 | INFO    | Run artifacts at: runs\run_20260422_231750

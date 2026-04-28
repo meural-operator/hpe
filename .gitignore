@@ -1,0 +1,131 @@
+# ============================================================================
+# HPE Repository .gitignore
+# ============================================================================
+# Strategy:
+#   - All framework source code (.py, .yaml, configs, tests) → tracked normally
+#   - Target run (run_20260422_231750) → best & latest checkpoints via Git LFS
+#   - Paper directory, epoch checkpoints, other runs, caches → ignored
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Python bytecode & caches
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.so
+
+# ---------------------------------------------------------------------------
+# Pytest cache
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+venv/
+.venv/
+env/
+.env
+
+# ---------------------------------------------------------------------------
+# IDE / Editor files
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# OS generated files
+# ---------------------------------------------------------------------------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Distribution / packaging
+# ---------------------------------------------------------------------------
+dist/
+build/
+*.egg-info/
+*.egg
+*.whl
+
+# ---------------------------------------------------------------------------
+# Training runs — IGNORE ALL except the target run
+# ---------------------------------------------------------------------------
+# Ignore every run directory under hyperbolic/runs/...
+hyperbolic/runs/*/
+
+# ...then UN-IGNORE the target run we want to keep
+!hyperbolic/runs/run_20260422_231750/
+
+# Inside the target run, ignore the src/ snapshot (duplicate of framework
+# code), the nested wandb logs, and epoch checkpoints (keep only best & latest)
+hyperbolic/runs/run_20260422_231750/src/
+hyperbolic/runs/run_20260422_231750/wandb/
+hyperbolic/runs/run_20260422_231750/checkpoints/checkpoint_epoch_*.pth
+
+# ---------------------------------------------------------------------------
+# Weights & Biases (top-level wandb directories)
+# ---------------------------------------------------------------------------
+wandb/
+
+# ---------------------------------------------------------------------------
+# Large data files — datasets should NOT live in the repo
+# ---------------------------------------------------------------------------
+*.npy
+*.npz
+*.hdf5
+*.tfrecords
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# ---------------------------------------------------------------------------
+# Model weight formats that are NOT .pth (safety net)
+# (.pth and .pt are handled by Git LFS, not ignored)
+# ---------------------------------------------------------------------------
+*.onnx
+*.h5
+*.pkl
+*.safetensors
+
+# ---------------------------------------------------------------------------
+# NeurIPS paper (private — not pushed to repo)
+# ---------------------------------------------------------------------------
+hyperbolic/hyperbolic_hpe_neurIPS2026/
+
+# ---------------------------------------------------------------------------
+# LaTeX build artifacts (keep .tex, .sty, .bib source files)
+# ---------------------------------------------------------------------------
+*.aux
+*.bbl
+*.blg
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+
+# Ignore *.log globally (LaTeX logs, debug logs, etc.)
+*.log
+
+# But UN-IGNORE the training log in our target run
+!hyperbolic/runs/run_20260422_231750/train.log
+
+# ---------------------------------------------------------------------------
+# Debug logs at framework level
+# ---------------------------------------------------------------------------
+hyperbolic/tea_debug.log

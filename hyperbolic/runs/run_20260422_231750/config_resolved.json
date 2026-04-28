@@ -1,0 +1,24 @@
+{
+  "learning_rate": 0.0001,
+  "batch_size": 16,
+  "weight_decay": 0.01,
+  "lr_decay": 0.99,
+  "epochs": 60,
+  "embed_dim": 512,
+  "num_spatial": 3,
+  "num_temporal": 3,
+  "temporal_window": 3,
+  "mlp_ratio": 4,
+  "dropout": 0.1,
+  "data_root": "C:/Users/DIAT/ashish/hpe/steins_shrinkage/MotionAGFormer/data/motion3d/",
+  "subset_list": [
+    "H36M-243"
+  ],
+  "num_joints": 17,
+  "root_rel": true,
+  "add_velocity": false,
+  "n_frames": 243,
+  "use_proj_as_2d": false,
+  "flip": true,
+  "lr": 0.0001
+}
