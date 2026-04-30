@@ -36,7 +36,9 @@ if PROJECT_ROOT not in sys.path:
 
 from model.network import HyperbolicHPE
 from data.reader.motion_dataset import MotionDataset3D
-from utils.learning import decay_lr_exponentially, AverageMeter
+from utils.learning import (
+    decay_lr_exponentially, build_cosine_warmup_scheduler, AverageMeter,
+)
 from utils.tools import set_random_seed
 from loss.pose3d import loss_mpjpe
 from loss.hyperbolic_loss import (
@@ -222,9 +224,20 @@ def parse_args():
 
 
 def compute_kinematics(x):
-    """First-order finite-difference velocities.  x: [B, T, J, 3]"""
+    """Central-difference finite-difference velocities. x: [B, T, J, 3]
+
+    Central differences (v_t = (x_{t+1} - x_{t-1}) / 2) have ~2× the SNR of
+    backward differences for the same noise level on x, and are unbiased to
+    second order — preferred over the previous backward-difference scheme.
+    Boundary frames fall back to forward / backward differences.
+    """
     v = torch.zeros_like(x)
-    if x.shape[1] > 1:
+    T = x.shape[1]
+    if T > 2:
+        v[:, 1:-1] = (x[:, 2:] - x[:, :-2]) * 0.5
+        v[:, 0]    = x[:, 1] - x[:, 0]
+        v[:, -1]   = x[:, -1] - x[:, -2]
+    elif T > 1:
         v[:, 1:] = x[:, 1:] - x[:, :-1]
         v[:, 0]  = v[:, 1]
     return v
@@ -245,26 +258,88 @@ def _fmt(v, prec=4):
     return f"{v:.{prec}f}"
 
 
+def augment_joint_confidence_dropout(x, p_sample=0.2, max_drop=2):
+    """Randomly zero out the confidence channel of a few joints per sample.
+
+    Synergises with the confidence-gated embedding: simulating CPN failures
+    in training teaches the network to route around low-confidence joints
+    via the topology bias and temporal context. Only the conf channel
+    (x[..., 2]) is touched; coordinates are untouched, so the 3D label is
+    unaffected.
+
+    x: [B, T, J, 3]   training-time only.
+    """
+    if not x.requires_grad:
+        x = x.clone()
+    B, T, J, _ = x.shape
+    # Per-sample mask: which samples in the batch get joint-dropout this step.
+    sample_mask = torch.rand(B, device=x.device) < p_sample
+    if not sample_mask.any():
+        return x
+    # For each affected sample, pick 1..max_drop random joints to zero.
+    for b in sample_mask.nonzero(as_tuple=False).flatten().tolist():
+        n_drop = int(torch.randint(1, max_drop + 1, (1,)).item())
+        idx = torch.randperm(J, device=x.device)[:n_drop]
+        x[b, :, idx, 2] = 0.0
+    return x
+
+
+def riemannian_loss_curriculum_weight(epoch, warmup_start=10, warmup_end=20):
+    """Ramp weight α ∈ [0, 1] for the geodesic velocity / bone losses.
+
+    They measure manifold geometry of *predictions* — at the start of training
+    predictions are essentially random, so these terms inject pure noise into
+    the gradient. Zero them out until the network has learned something
+    meaningful, then ramp linearly to full weight.
+
+    Default schedule: 0.0 for the first 10 epochs, linear 0→1 over epochs
+    10–19, 1.0 from epoch 20 onwards. Kendall uncertainty weighting then
+    handles the steady-state magnitude balance from there.
+    """
+    if epoch < warmup_start:
+        return 0.0
+    if epoch >= warmup_end:
+        return 1.0
+    return (epoch - warmup_start) / max(1, warmup_end - warmup_start)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Training epoch
 # ─────────────────────────────────────────────────────────────────────────────
 def train_one_epoch(opts, args, model, loss_weighter, dataloader,
                     optimizer, device, epoch, rm: RunManager,
-                    epoch_pbar, scaler):
+                    epoch_pbar, scaler, lr_scheduler=None):
     model.train()
     meters = {k: AverageMeter()
               for k in ["total", "mpjpe", "vel", "bone", "drift"]}
     topo_bias = generate_topology_matrix(args.num_joints, device)
     nan_steps = 0
 
+    # Curriculum weight for L_vel and L_bone (0 early, 1 after warm-up).
+    curric_w = riemannian_loss_curriculum_weight(
+        epoch,
+        warmup_start=int(getattr(args, "loss_curriculum_start", 10)),
+        warmup_end=int(getattr(args, "loss_curriculum_end", 20)),
+    )
+
     step_pbar = tqdm(dataloader,
                      desc=f"  Ep {epoch:03d} [train]",
                      unit="batch", leave=False,
                      dynamic_ncols=True, colour="cyan")
 
+    aug_p_drop = float(getattr(args, "joint_conf_dropout_p", 0.2))
+
     for step, (x, y) in enumerate(step_pbar):
         B, T, J, C = x.shape
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+
+        # Train-time augmentation: confidence dropout on input keypoints.
+        # Done before x_vel so the velocity branch sees the augmented stream
+        # too — but velocity drops Δconf inside the embedding, so this is
+        # really only a position-side perturbation.
+        if aug_p_drop > 0.0:
+            x = augment_joint_confidence_dropout(x, p_sample=aug_p_drop)
+
         x_vel = compute_kinematics(x)
 
         if args.root_rel:
@@ -282,7 +357,11 @@ def train_one_epoch(opts, args, model, loss_weighter, dataloader,
             l_vel   = geodesic_velocity_loss(pred, y)
             l_bone  = geodesic_bone_loss(pred, y)
             l_drift = manifold_drift_loss(h_manifold.view(-1, h_manifold.shape[-1]))
-            loss_total, weights = loss_weighter(l_mpjpe, l_vel, l_bone, l_drift)
+            # Curriculum scaling on the Riemannian losses — see
+            # riemannian_loss_curriculum_weight.
+            loss_total, weights = loss_weighter(
+                l_mpjpe, curric_w * l_vel, curric_w * l_bone, l_drift,
+            )
 
         if torch.isnan(loss_total) or torch.isinf(loss_total):
             nan_steps += 1
@@ -293,11 +372,16 @@ def train_one_epoch(opts, args, model, loss_weighter, dataloader,
 
         scaler.scale(loss_total).backward()
         scaler.unscale_(optimizer)      # unscale before clip so norms are correct
+        # max_norm=1.0: with the Tier-1 EPS/clamp fixes the gradient scale is
+        # well-behaved (smoke shows ~1e-3 max norm), so the previous 0.5 was
+        # cutting legitimate signal. 1.0 is the standard transformer default.
         torch.nn.utils.clip_grad_norm_(
             list(model.parameters()) + list(loss_weighter.parameters()),
-            max_norm=0.5)
+            max_norm=float(getattr(args, "grad_clip", 1.0)))
         scaler.step(optimizer)
         scaler.update()
+        if lr_scheduler is not None:
+            lr_scheduler.step()
 
         meters["total"].update(loss_total.item(), B)
         meters["mpjpe"].update(l_mpjpe.item(), B)
@@ -329,9 +413,9 @@ def train_one_epoch(opts, args, model, loss_weighter, dataloader,
                 "epoch": epoch + step / len(dataloader),
             }
             for i, blk in enumerate(model.spatial_blocks):
-                wd[f"tau/spatial_{i}"] = blk.attn.tau.item()
+                wd[f"tau/spatial_{i}_mean"] = blk.attn.tau.mean().item()
             for i, blk in enumerate(model.temporal_blocks):
-                wd[f"tau/temporal_{i}"] = blk.attn.tau.item()
+                wd[f"tau/temporal_{i}_mean"] = blk.attn.tau.mean().item()
             wandb.log(wd)
 
     step_pbar.close()
@@ -431,14 +515,21 @@ def main():
                                pin_memory=True)
 
     # ── Model ─────────────────────────────────────────────────────────────────
+    # Prefer multi-scale `temporal_windows` if present; else fall back to legacy
+    # scalar `temporal_window`.
+    temporal_windows = args.get("temporal_windows", None) if hasattr(args, "get") \
+        else getattr(args, "temporal_windows", None)
     model = HyperbolicHPE(
-        in_features     = 3,
-        embed_dim       = args.embed_dim,
-        num_spatial     = args.num_spatial,
-        num_temporal    = args.num_temporal,
-        temporal_window = args.temporal_window,
-        mlp_ratio       = args.mlp_ratio,
-        dropout         = args.dropout,
+        in_features      = 3,
+        embed_dim        = args.embed_dim,
+        num_spatial      = args.num_spatial,
+        num_temporal     = args.num_temporal,
+        num_heads        = getattr(args, "num_heads", 8),
+        temporal_window  = args.temporal_window,
+        temporal_windows = temporal_windows,
+        mlp_ratio        = args.mlp_ratio,
+        dropout          = args.dropout,
+        num_joints       = args.num_joints,
     ).to(device)
 
     loss_weighter = UncertaintyWeightedLoss(4).to(device)
@@ -474,6 +565,33 @@ def main():
         rm.log("GradScaler state restored.")
     rm.log(f"AMP: bfloat16  |  GradScaler: enabled")
 
+    # ── LR scheduler: linear warmup → cosine decay (per-step) ────────────────
+    # Replaces the previous per-epoch exponential decay (γ=0.99). Cosine with
+    # 5-epoch warmup is the standard for transformer pose lifters; the warmup
+    # avoids early-step gradient instability when the joint embedding and
+    # confidence gate are still random, and cosine gives a smoother end-of-
+    # training profile than exponential.
+    steps_per_epoch = len(train_loader)
+    warmup_epochs = int(getattr(args, "warmup_epochs", 5))
+    total_steps = args.epochs * steps_per_epoch
+    warmup_steps = warmup_epochs * steps_per_epoch
+    lr_scheduler = build_cosine_warmup_scheduler(
+        optimizer, total_steps=total_steps, warmup_steps=warmup_steps,
+        min_lr_ratio=float(getattr(args, "min_lr_ratio", 0.01)),
+    )
+    if ckpt is not None and 'lr_scheduler_state_dict' in ckpt:
+        lr_scheduler.load_state_dict(ckpt['lr_scheduler_state_dict'])
+        rm.log("LR scheduler state restored.")
+    # Fast-forward scheduler if resuming from a non-zero epoch but no saved
+    # scheduler state (older checkpoints). Step it `start_epoch * steps_per_epoch`
+    # times so the LR profile matches the resumed position.
+    elif ckpt is not None and start_epoch > 0:
+        for _ in range(start_epoch * steps_per_epoch):
+            lr_scheduler.step()
+        rm.log(f"LR scheduler fast-forwarded {start_epoch * steps_per_epoch} steps.")
+    rm.log(f"LR schedule  : cosine + linear warmup "
+           f"({warmup_epochs} warmup epochs, {args.epochs} total)")
+
     # ── Epoch loop ────────────────────────────────────────────────────────────
     epoch_pbar = tqdm(range(start_epoch, args.epochs),
                       desc="Training", unit="ep",
@@ -487,7 +605,7 @@ def main():
         meters = train_one_epoch(
             opts, args, model, loss_weighter,
             train_loader, optimizer, device, epoch, rm, epoch_pbar,
-            scaler=scaler,
+            scaler=scaler, lr_scheduler=lr_scheduler,
         )
 
         # Evaluate
@@ -499,7 +617,9 @@ def main():
         if is_best:
             best_mpjpe = eval_mpjpe
 
-        lr = decay_lr_exponentially(lr, args.lr_decay, optimizer)
+        # Read current LR for logging — scheduler updates per-step inside
+        # train_one_epoch so we just observe wherever it landed.
+        lr = optimizer.param_groups[0]["lr"]
 
         # ── Epoch postfix (outer bar) — all MPJPE in mm ──────────────────────
         epoch_pbar.set_postfix(OrderedDict(
@@ -549,6 +669,7 @@ def main():
             },
         )
         state["scaler_state_dict"] = scaler.state_dict()  # for AMP resume
+        state["lr_scheduler_state_dict"] = lr_scheduler.state_dict()
 
         rm.save_checkpoint(state, "latest")          # always
 

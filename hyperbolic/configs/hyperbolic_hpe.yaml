@@ -5,14 +5,29 @@
 learning_rate: 0.0001
 batch_size: 8
 weight_decay: 0.01
-lr_decay: 0.99
+lr_decay: 0.99           # legacy; cosine+warmup scheduler is now used
 epochs: 60
+warmup_epochs: 5         # linear LR warmup before cosine decay
+min_lr_ratio: 0.01       # cosine decay floor (× base LR)
+grad_clip: 1.0           # was 0.5; loosened after Tier-1 numerical fixes
+
+# Loss curriculum (zero L_vel/L_bone early, ramp to full)
+loss_curriculum_start: 10
+loss_curriculum_end: 20
+
+# Train-time augmentation
+joint_conf_dropout_p: 0.2  # per-sample probability of zeroing confidence on 1-2 joints
 
 # Model
 embed_dim: 512
+num_heads: 8
 num_spatial: 3
 num_temporal: 3
-temporal_window: 3
+# Multi-scale temporal windows (one W per temporal block).
+# Effective receptive field: 3·(2·max(W) + 1) ≈ 165 frames at default,
+# vs ~19 frames with the previous uniform W=3.
+temporal_windows: [3, 9, 27]
+temporal_window: 3      # legacy scalar (only used if temporal_windows missing)
 mlp_ratio: 4
 dropout: 0.1
 

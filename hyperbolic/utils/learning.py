@@ -74,3 +74,32 @@ def decay_lr_exponentially(lr, lr_decay, optimizer):
     for param_group in optimizer.param_groups:
         param_group['lr'] *= lr_decay
     return lr
+
+
+def build_cosine_warmup_scheduler(optimizer, total_steps, warmup_steps,
+                                  min_lr_ratio=0.01):
+    """Linear warmup → cosine decay scheduler that steps per optimizer.step().
+
+    Multiplier schedule:
+      • step < warmup_steps   →  step / warmup_steps         (0 → 1)
+      • step ≥ warmup_steps   →  min_lr_ratio + (1-min_lr_ratio)·½(1+cos(π·p))
+                                  where p = (step-warmup) / (total-warmup)
+
+    The cosine floor at `min_lr_ratio · base_lr` keeps a small learning rate at
+    the end of training instead of going to literal zero, which avoids the
+    optimizer getting stuck in a bad local minimum on the last few epochs.
+    """
+    import math
+    from torch.optim.lr_scheduler import LambdaLR
+
+    warmup_steps = max(1, int(warmup_steps))
+    total_steps = max(warmup_steps + 1, int(total_steps))
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / warmup_steps
+        progress = (step - warmup_steps) / (total_steps - warmup_steps)
+        cos = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cos
+
+    return LambdaLR(optimizer, lr_lambda)

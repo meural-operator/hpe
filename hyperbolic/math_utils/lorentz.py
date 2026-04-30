@@ -1,9 +1,11 @@
+import functools
 import torch
 import torch.nn.functional as F
 
-# Use a larger epsilon for float32 stability in Lorentz operations.
-# 1e-7 is the sweet spot: large enough to prevent arccosh NaN, 
-# small enough to not distort the geometry.
+# fp32-safe epsilon. We force every Lorentz primitive to run in fp32 (see
+# `_fp32_lorentz` below) so this is honoured even when the surrounding model
+# runs under bf16 autocast — bf16 epsilon (~4e-3) would round 1e-7 to zero
+# and `clamp(min=1+EPS)` would hit the acosh boundary, blowing up gradients.
 EPS = 1e-7
 
 # Maximum norm for exp_map input to prevent cosh/sinh overflow.
@@ -12,6 +14,27 @@ EPS = 1e-7
 MAX_NORM = 15.0
 
 
+def _fp32_lorentz(fn):
+    """Force a Lorentz primitive to run in fp32 regardless of caller dtype.
+
+    The trig ops here (cosh/sinh/acosh) and the EPS-guarded reciprocals are
+    all unsafe in bf16. The matmul-free arithmetic inside is cheap, so the
+    upcast cost is negligible vs. the numerical risk of running them in bf16.
+    Output is fp32; downstream `nn.Linear` under autocast will recast as needed.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        def cast(x):
+            if isinstance(x, torch.Tensor) and x.is_floating_point() and x.dtype != torch.float32:
+                return x.float()
+            return x
+        args = tuple(cast(a) for a in args)
+        kwargs = {k: cast(v) for k, v in kwargs.items()}
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+@_fp32_lorentz
 def lorentz_inner(u, v, keepdim=False):
     """Lorentzian inner product: <u, v>_L = -u_0*v_0 + sum(u_i*v_i)"""
     uv = u * v
@@ -21,10 +44,12 @@ def lorentz_inner(u, v, keepdim=False):
     return res
 
 
+@_fp32_lorentz
 def lorentz_sqnorm(u, keepdim=False):
     return lorentz_inner(u, u, keepdim=keepdim)
 
 
+@_fp32_lorentz
 def dist(u, v, keepdim=False):
     """Hyperbolic distance: d_L(u, v) = arccosh(-<u, v>_L)"""
     inner = -lorentz_inner(u, v, keepdim=keepdim)
@@ -40,6 +65,7 @@ def origin(shape, device=None, dtype=None):
     return o
 
 
+@_fp32_lorentz
 def project(x):
     """Projects x ∈ R^{d+1} onto H^d by setting x_0 = sqrt(1 + ||x_{1:}||²)"""
     spatial = x[..., 1:]
@@ -63,6 +89,7 @@ def _spatial_norm(vi):
     return torch.sqrt(torch.sum(vi ** 2, dim=-1, keepdim=True).clamp(min=0.0) + EPS)
 
 
+@_fp32_lorentz
 def exp_map(x, v):
     """
     Exponential map: exp_x(v) = cosh(||v||) x + sinh(||v||) v/||v||
@@ -81,6 +108,7 @@ def exp_map(x, v):
     return torch.where(cond, res, x + v_clamped)
 
 
+@_fp32_lorentz
 def exp_map0(v):
     """
     Exponential map from origin — allocation-free fused implementation.
@@ -109,6 +137,7 @@ def exp_map0(v):
     return torch.where(norm > EPS, res, fallback)
 
 
+@_fp32_lorentz
 def log_map(x, y):
     """
     Logarithmic map: log_x(y) = d(x,y) * (y + <x,y>_L x) / ||y + <x,y>_L x||_L
@@ -130,6 +159,7 @@ def log_map(x, y):
     return torch.where(cond, res, torch.zeros_like(res))
 
 
+@_fp32_lorentz
 def log_map0(y):
     """
     Logarithmic map to origin — allocation-free fused implementation.
@@ -160,6 +190,7 @@ def log_map0(y):
     return torch.where(norm_yi > EPS, res, torch.zeros_like(res))
 
 
+@_fp32_lorentz
 def parallel_transport(x, y, v):
     """
     Parallel transport of v ∈ T_x H^d to T_y H^d:
@@ -174,6 +205,7 @@ def parallel_transport(x, y, v):
     return v + (yv / denom) * (x + y)
 
 
+@_fp32_lorentz
 def einstein_midpoint(weights, x):
     """
     Einstein Midpoint aggregation: exp_0(Σ w_j log_0(x_j))
