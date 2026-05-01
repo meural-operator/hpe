@@ -129,3 +129,4 @@ hyperbolic/hyperbolic_hpe_neurIPS2026/
 # Debug logs at framework level
 # ---------------------------------------------------------------------------
 hyperbolic/tea_debug.log
+.claude/
