@@ -1,0 +1,3 @@
+[submodule "adicton"]
+	path = adicton
+	url = https://github.com/meural-operator/adicton.git
