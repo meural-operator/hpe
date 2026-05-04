@@ -1,45 +1,28 @@
-"""verify_eval.py — independent sanity check on the MPJPE units that
-train.py reports.
+"""verify_eval.py — apples-to-apples MPJPE check against MotionAGFormer.
 
-What this does
---------------
-Loads a saved checkpoint, runs the test loader once, and reports the eval
-metric three ways so you can confirm whether the headline number is in
-real millimetres of camera-space MPJPE or in some other unit:
+The training loop's `evaluate()` reports `loss_mpjpe(pred, y) * 1000`, which
+is the L2 distance in *normalised* coordinates scaled by 1000. That is NOT
+the same as the MPJPE that MotionAGFormer / MotionBERT report in mm
+camera-space; their pipeline does an additional `denormalize → × 2.5d_factor
+→ root-relative` step before computing the error.
 
-  (A)  RAW MEAN: mean Euclidean distance between pred and target in
-       *whatever units the dataloader stores* (this is what loss_mpjpe
-       computes inside train.evaluate).
-  (B)  CONVENTION: (A) × 1000 — the value train.py displays as "mm".
-  (C)  RANGE PROBE: descriptive stats on the target tensor itself
-       (per-channel range, std, root-relative norms) so you can decide
-       whether the storage unit is metres, mm, normalised image-pixel,
-       or normalised "meta" units.
-
-Then it interprets the result:
-
-  * If target values lie roughly in [-1, +1] but represent METRES
-    (the MotionAGFormer / MotionBERT convention for H3.6M cam-source
-    pkls), then (B) is the real MPJPE in mm and the train.py output
-    is correct.
-
-  * If targets lie in [-1, +1] and represent normalised IMAGE-PIXEL
-    coordinates (e.g. raw `joint3d_image / res_w * 2`), the conversion
-    factor depends on per-camera intrinsics and (B) is *not* directly
-    comparable to other papers' MPJPE.
+This script implements that exact pipeline against your trained checkpoint
+so the resulting number is directly comparable to published 38.4 mm and
+similar baselines.
 
 Usage
 -----
     python scripts/verify_eval.py --run-dir runs/run_YYYYMMDD_HHMMSS
                                   [--ckpt checkpoint_best.pth]
-                                  [--max-batches 50]    # quick check
+                                  [--source-pkl <abs path to h36m source pkl>]
 
-The script does NOT require any training to be running; it is a
-read-only consumer of the checkpoint and the same test loader train.py
-uses, so it produces directly comparable numbers.
+If --source-pkl is omitted, the script looks for `h36m_sh_conf_cam_source_final.pkl`
+(or `h36m_cpn_cam_source.pkl`) one directory above the configured
+`data_root`.
 """
 import argparse
 import os
+import pickle
 import sys
 from pathlib import Path
 
@@ -47,80 +30,98 @@ import numpy as np
 import torch
 import yaml
 from easydict import EasyDict as edict
-from torch.utils.data import DataLoader
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from model.network import HyperbolicHPE
-from data.reader.motion_dataset import MotionDataset3D
-from loss.pose3d import loss_mpjpe
+from data.reader.h36m import DataReaderH36M
 from train import compute_kinematics, generate_topology_matrix
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MPJPE helpers (same as MotionAGFormer/MotionBERT)
+# ─────────────────────────────────────────────────────────────────────────────
+def calculate_mpjpe(pred, gt):
+    """pred, gt: [N, J, 3] in mm. Returns per-frame MPJPE in mm: [N]."""
+    return np.linalg.norm(pred - gt, axis=-1).mean(axis=-1)
+
+
+def calculate_p_mpjpe(pred, gt):
+    """Procrustes-aligned MPJPE. pred, gt: [N, J, 3] in mm. Returns [N]."""
+    muX = gt.mean(axis=1, keepdims=True)
+    muY = pred.mean(axis=1, keepdims=True)
+    X0 = gt - muX
+    Y0 = pred - muY
+    normX = np.sqrt((X0 ** 2).sum(axis=(1, 2), keepdims=True))
+    normY = np.sqrt((Y0 ** 2).sum(axis=(1, 2), keepdims=True))
+    X0 /= np.clip(normX, 1e-8, None)
+    Y0 /= np.clip(normY, 1e-8, None)
+    H = np.matmul(X0.transpose(0, 2, 1), Y0)
+    U, s, Vt = np.linalg.svd(H)
+    V = Vt.transpose(0, 2, 1)
+    R = np.matmul(V, U.transpose(0, 2, 1))
+    sign_detR = np.sign(np.expand_dims(np.linalg.det(R), axis=1))
+    V[:, :, -1] *= sign_detR
+    s[:, -1] *= sign_detR.flatten()
+    R = np.matmul(V, U.transpose(0, 2, 1))
+    tr = np.expand_dims(np.sum(s, axis=1, keepdims=True), axis=2)
+    a = tr * normX / np.clip(normY, 1e-8, None)
+    t = muX - a * np.matmul(muY, R)
+    pred_aligned = a * np.matmul(pred, R) + t
+    return np.linalg.norm(pred_aligned - gt, axis=-1).mean(axis=-1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--run-dir", required=True,
-                   help="path to a runs/run_YYYYMMDD_HHMMSS directory")
-    p.add_argument("--ckpt", default="checkpoint_best.pth",
-                   help="checkpoint file inside run-dir/checkpoints/")
-    p.add_argument("--config", default=None,
-                   help="override config; default = run-dir/config.yaml")
-    p.add_argument("--max-batches", type=int, default=0,
-                   help="if > 0, stop after this many test batches (quick smoke)")
+    p.add_argument("--run-dir", required=True)
+    p.add_argument("--ckpt", default="checkpoint_best.pth")
+    p.add_argument("--config", default=None)
+    p.add_argument("--source-pkl", default=None,
+                   help="absolute path to the H3.6M source pkl with "
+                        "`2.5d_factor`, `joints_2.5d_image`, etc. If omitted, "
+                        "script tries to auto-locate next to data_root.")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--batch-size", type=int, default=2,
+                   help="inference batch size; small default for GPU-contended runs")
+    p.add_argument("--max-clips", type=int, default=0,
+                   help="if > 0, stop after this many test clips (quick check)")
     return p.parse_args()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+def autolocate_source_pkl(data_root):
+    """Search the parent of data_root for a recognisable H3.6M source pkl."""
+    parent = Path(data_root).resolve()
+    candidates = [
+        parent / "h36m_sh_conf_cam_source_final.pkl",
+        parent / "h36m_cpn_cam_source.pkl",
+        parent.parent / "h36m_sh_conf_cam_source_final.pkl",
+        parent.parent / "h36m_cpn_cam_source.pkl",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
+
+
 def build_model(cfg, device):
-    """Mirror the constructor used in train.py."""
     temporal_windows = (cfg.get("temporal_windows", None)
                         if hasattr(cfg, "get")
                         else getattr(cfg, "temporal_windows", None))
-    model = HyperbolicHPE(
-        in_features      = 3,
-        embed_dim        = cfg.embed_dim,
-        num_spatial      = cfg.num_spatial,
-        num_temporal     = cfg.num_temporal,
-        num_heads        = int(getattr(cfg, "num_heads", 8)),
-        temporal_window  = cfg.temporal_window,
-        temporal_windows = temporal_windows,
-        mlp_ratio        = cfg.mlp_ratio,
-        dropout          = cfg.dropout,
-        num_joints       = cfg.num_joints,
+    return HyperbolicHPE(
+        in_features=3,
+        embed_dim=cfg.embed_dim,
+        num_spatial=cfg.num_spatial,
+        num_temporal=cfg.num_temporal,
+        num_heads=int(getattr(cfg, "num_heads", 8)),
+        temporal_window=cfg.temporal_window,
+        temporal_windows=temporal_windows,
+        mlp_ratio=cfg.mlp_ratio,
+        dropout=cfg.dropout,
+        num_joints=cfg.num_joints,
     ).to(device)
-    return model
-
-
-def describe_tensor(name, t):
-    """Per-channel stats on a 3-channel pose tensor [..., 3]."""
-    flat = t.detach().reshape(-1, t.shape[-1]).float().cpu().numpy()
-    mins = flat.min(axis=0); maxs = flat.max(axis=0); stds = flat.std(axis=0)
-    print(f"  {name:<22} per-channel min={np.round(mins, 3).tolist()}, "
-          f"max={np.round(maxs, 3).tolist()}, std={np.round(stds, 3).tolist()}")
-
-
-def interpret_units(y_stats):
-    """Heuristic: classify the storage unit of the GT joints."""
-    abs_max = max(abs(v) for v in y_stats["max"]) \
-              if y_stats["max"] is not None else 0.0
-    if abs_max <= 2.5:
-        return ("normalised", "values in roughly [-1, 1]; either metres "
-                              "(MotionBERT/MotionAGFormer convention — "
-                              "× 1000 IS millimetres) or image-pixel "
-                              "normalisation (× 1000 is NOT mm)")
-    if 50 < abs_max < 1500:
-        return ("pixels", "values in [-500, +500] range; image-pixel space, "
-                          "needs deprojection to get mm")
-    if abs_max >= 200:
-        return ("millimetres", "values in [-1000, +1000] mm range; raw "
-                               "camera-space, loss IS mm directly (no × 1000 "
-                               "needed)")
-    return ("unknown", "could not classify automatically; inspect the per-channel "
-                       "stats above")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,143 +129,212 @@ def main():
     opts = parse_args()
     device = torch.device(opts.device)
 
-    # ── Load config ──────────────────────────────────────────────────────────
+    # ── Config + checkpoint ──────────────────────────────────────────────────
     run_dir = Path(opts.run_dir)
     cfg_path = Path(opts.config) if opts.config else (run_dir / "config.yaml")
-    if not cfg_path.exists():
-        # train.py also saves config_resolved.json — but we want the YAML form
-        # used at construction. Fall back to a sibling config.
-        cfg_path = run_dir / "config.yaml"
-    print(f"Loading config from: {cfg_path}")
+    print(f"Config: {cfg_path}")
     with open(cfg_path) as f:
         cfg = edict(yaml.safe_load(f))
-    cfg.lr = cfg.learning_rate
 
-    # ── Load checkpoint ──────────────────────────────────────────────────────
     ckpt_path = run_dir / "checkpoints" / opts.ckpt
-    print(f"Loading checkpoint: {ckpt_path}")
+    print(f"Checkpoint: {ckpt_path}")
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    print(f"  checkpoint epoch       = {ckpt.get('epoch', '?')}")
-    print(f"  checkpoint best_mpjpe  = {ckpt.get('best_mpjpe', '?')}  "
-          f"(this is what train.py stored; same unit as below)")
+    print(f"  epoch       = {ckpt.get('epoch', '?')}")
+    print(f"  best_mpjpe  = {ckpt.get('best_mpjpe', '?')}  "
+          f"(train.py units, ≈ normalised loss)")
+
+    # ── Source pkl ───────────────────────────────────────────────────────────
+    src_pkl = opts.source_pkl or autolocate_source_pkl(cfg.data_root)
+    if not src_pkl or not Path(src_pkl).exists():
+        sys.exit(
+            "Could not locate the H3.6M source pkl.\n"
+            f"Searched near data_root={cfg.data_root}\n"
+            "Pass --source-pkl <abs path to h36m_*_cam_source*.pkl>."
+        )
+    print(f"Source pkl: {src_pkl}")
+    src_dir, src_name = os.path.split(src_pkl)
+
+    # ── DataReaderH36M (matches MotionAGFormer's eval exactly) ───────────────
+    n_frames = int(cfg.n_frames)
+    datareader = DataReaderH36M(
+        n_frames=n_frames,
+        sample_stride=1,
+        data_stride_train=n_frames // 3,
+        data_stride_test=n_frames,
+        dt_root=src_dir,
+        dt_file=src_name,
+    )
+
+    print("Reading + slicing test data...")
+    train_data, test_data, train_labels, test_labels = datareader.get_sliced_data()
+    print(f"  test_data  shape: {test_data.shape}     (clips, T, J, 3)")
+    print(f"  test_labels shape: {test_labels.shape}  (clips, T, J, 3)")
 
     # ── Build model ──────────────────────────────────────────────────────────
     model = build_model(cfg, device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model parameters: {n_params:,}")
+    print(f"\nModel parameters: {n_params:,}\n")
 
-    # ── Test loader (mirror train.py) ────────────────────────────────────────
-    print("\nBuilding test dataset (this can take a moment on first run)...")
-    test_dataset = MotionDataset3D(cfg, cfg.subset_list, "test")
-    test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size,
-                             shuffle=False, num_workers=0, pin_memory=True)
-    n_clips = len(test_dataset)
-    print(f"Test dataset: {n_clips} clips of T={cfg.n_frames} frames each\n")
-
+    # ── Inference (batched) ──────────────────────────────────────────────────
     topo = generate_topology_matrix(cfg.num_joints, device)
+    n_clips_total = test_data.shape[0]
+    n_clips_eval = n_clips_total
+    if opts.max_clips and opts.max_clips < n_clips_total:
+        n_clips_eval = int(opts.max_clips)
+        print(f"  --max-clips: evaluating first {n_clips_eval} of "
+              f"{n_clips_total} clips (others left as zeros, skipped downstream)")
+    bs = int(opts.batch_size)
+    # Keep results_all full-shape so datareader.denormalize() — which indexes
+    # test_hw by absolute clip id — does not mis-align. Unevaluated rows stay
+    # at zero and are explicitly skipped in the per-action accumulation below.
+    results_all = np.zeros_like(test_labels)
+    n_clips = n_clips_eval  # used for inference loop only
 
-    # ── Probe the first batch's value ranges ─────────────────────────────────
-    first_x, first_y = next(iter(test_loader))
-    first_x, first_y = first_x.to(device), first_y.to(device)
-    first_y_rr = first_y - first_y[..., 0:1, :]   # root-relative
-
-    print("=" * 72)
-    print("VALUE-RANGE PROBE (first batch)")
-    print("=" * 72)
-    describe_tensor("x (input 2D+conf)", first_x)
-    describe_tensor("y (raw target 3D)", first_y)
-    describe_tensor("y root-relative", first_y_rr)
-
-    y_stats = {
-        "min": [float(first_y_rr[..., c].min()) for c in range(3)],
-        "max": [float(first_y_rr[..., c].max()) for c in range(3)],
-        "std": [float(first_y_rr[..., c].std()) for c in range(3)],
-    }
-    unit_class, unit_help = interpret_units(y_stats)
-    print(f"\n  → Inferred storage unit: \033[1m{unit_class}\033[0m")
-    print(f"     {unit_help}")
-    print()
-
-    # ── Sweep the full test set computing all variants ───────────────────────
-    print("=" * 72)
-    print("MPJPE SWEEP (test set)")
-    print("=" * 72)
-    sum_loss = 0.0    # (A) raw L2 distance in storage units, summed weight = num samples
-    sum_n = 0
-    n_batches = 0
-
+    import time
+    print(f"Running inference: {n_clips} clips, batch size {bs}, on {device}...")
+    print(f"  (live ticks every batch; '.'=ok, 's'=>5s/batch, 'S'=>15s/batch)")
+    t_start = time.time()
+    last_log_t = t_start
+    n_batches = (n_clips + bs - 1) // bs
     with torch.no_grad():
-        for batch_idx, (x, y) in enumerate(test_loader):
-            B = x.shape[0]
-            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        for bi, i in enumerate(range(0, n_clips, bs)):
+            j = min(i + bs, n_clips)
+            tb0 = time.time()
+            x = torch.from_numpy(test_data[i:j]).float().to(device)
             x_vel = compute_kinematics(x)
-
             pred = model(x, x_vel, topo)
-            if cfg.root_rel:
-                pred = pred - pred[..., 0:1, :]
-                y    = y    - y[..., 0:1, :]
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            results_all[i:j] = pred.cpu().numpy()
+            dt = time.time() - tb0
+            tick = "." if dt < 5 else ("s" if dt < 15 else "S")
+            sys.stdout.write(tick)
+            sys.stdout.flush()
+            # Periodic ETA line
+            if time.time() - last_log_t > 30 or bi == n_batches - 1:
+                elapsed = time.time() - t_start
+                rate = (bi + 1) / max(1e-9, elapsed)
+                remaining = (n_batches - bi - 1) / max(1e-9, rate)
+                sys.stdout.write(
+                    f"\n  [{bi+1}/{n_batches} batches | "
+                    f"clips {j}/{n_clips} | "
+                    f"{elapsed:.1f}s elapsed | "
+                    f"{rate:.2f} batch/s | "
+                    f"ETA {remaining:.0f}s]\n"
+                )
+                sys.stdout.flush()
+                last_log_t = time.time()
+    print("\nDone.\n")
 
-            loss = loss_mpjpe(pred, y).item()    # mean L2 over all (B, T, J)
-            sum_loss += loss * B
-            sum_n += B
-            n_batches += 1
-            if opts.max_batches and n_batches >= opts.max_batches:
-                print(f"  (stopped early after {n_batches} batches per --max-batches)")
-                break
-
-    raw_mpjpe = sum_loss / max(1, sum_n)
-    convention_mpjpe = raw_mpjpe * 1000.0
-
-    print(f"  Batches processed       : {n_batches}")
-    print(f"  Clips processed         : {sum_n} / {n_clips}")
+    # ── Replicate MotionAGFormer's evaluate() exactly ────────────────────────
+    print("Applying MotionAGFormer eval pipeline:")
+    print("  1) datareader.denormalize(pred)")
+    print("  2) pred *= 2.5d_factor")
+    print("  3) root-relative subtraction")
+    print("  4) MPJPE in mm  (per-action mean → mean across actions)")
     print()
-    print(f"  (A) RAW mean L2 distance        = {raw_mpjpe:.6f}  "
-          f"[storage units]")
-    print(f"  (B) train.py CONVENTION × 1000  = {convention_mpjpe:.2f}     "
-          f"[interpreted as mm by train.py]")
 
-    # ── Verdict ──────────────────────────────────────────────────────────────
+    # 1) Denormalize predictions back to image-pixel-equivalent space
+    results_all = datareader.denormalize(results_all)   # → [N_clips, T, J, 3]
+
+    # 2) Pull factors and ground-truth in 2.5d image form
+    _, split_id_test = datareader.get_split_id()
+    actions = np.array(datareader.dt_dataset['test']['action'])
+    factors = np.array(datareader.dt_dataset['test']['2.5d_factor'])
+    gts     = np.array(datareader.dt_dataset['test']['joints_2.5d_image'])
+    sources = np.array(datareader.dt_dataset['test']['source'])
+
+    action_clips = actions[split_id_test]
+    factor_clips = factors[split_id_test]
+    source_clips = sources[split_id_test]
+    gt_clips     = gts[split_id_test]
+    num_test_frames = len(actions)
+
+    # MotionAGFormer skips these three known-corrupt sequences
+    block_list = ['s_09_act_05_subact_02',
+                  's_09_act_10_subact_02',
+                  's_09_act_13_subact_01']
+
+    # 3+4) Per-frame errors, accumulated then averaged per action
+    e1_all = np.zeros(num_test_frames)
+    e2_all = np.zeros(num_test_frames)
+    oc     = np.zeros(num_test_frames)
+    frame_clips = np.array(range(num_test_frames))[split_id_test]
+
+    skipped_partial = 0
+    for idx in range(len(action_clips)):
+        # Skip clips beyond what we actually ran inference on (matters with
+        # --max-clips; results_all rows past n_clips_eval are uninitialised
+        # zeros and would corrupt the metric if included).
+        if idx >= n_clips_eval:
+            skipped_partial += 1
+            continue
+        source = source_clips[idx][0][:-6]
+        if source in block_list:
+            continue
+        frame_list = frame_clips[idx]
+        factor = factor_clips[idx][:, None, None]
+        gt = gt_clips[idx]
+        pred = results_all[idx] * factor                # ← KEY denorm step
+
+        # Root-relative
+        pred = pred - pred[:, 0:1, :]
+        gt   = gt   - gt[:, 0:1, :]
+
+        err1 = calculate_mpjpe(pred, gt)
+        err2 = calculate_p_mpjpe(pred, gt)
+        e1_all[frame_list] += err1
+        e2_all[frame_list] += err2
+        oc[frame_list] += 1
+
+    action_names = sorted(set(actions))
+    results, results_p = {a: [] for a in action_names}, {a: [] for a in action_names}
+    for idx in range(num_test_frames):
+        if oc[idx] > 0:
+            results[actions[idx]].append(e1_all[idx] / oc[idx])
+            results_p[actions[idx]].append(e2_all[idx] / oc[idx])
+
+    per_action = []
+    per_action_p = []
+    for a in action_names:
+        if results[a]:
+            per_action.append(np.mean(results[a]))
+            per_action_p.append(np.mean(results_p[a]))
+    e1 = float(np.mean(per_action))
+    e2 = float(np.mean(per_action_p))
+
+    # ── Report ───────────────────────────────────────────────────────────────
+    print("=" * 72)
+    print("RESULTS  (MotionAGFormer eval pipeline)")
+    print("=" * 72)
+    if skipped_partial > 0:
+        coverage = 100.0 * (1 - skipped_partial / len(action_clips))
+        print(f"  ⚠ partial eval: {coverage:.1f}% of test clips "
+              f"({skipped_partial}/{len(action_clips)} skipped via --max-clips)")
+    print(f"  Protocol #1 MPJPE    = {e1:7.2f}  mm       ← compare to MotionAGFormer 38.4")
+    print(f"  Protocol #2 P-MPJPE  = {e2:7.2f}  mm")
+    print()
+    print("Per-action MPJPE (mm):")
+    for a, v in zip(action_names, per_action):
+        print(f"  {a:<14s} {v:6.2f}")
     print()
     print("=" * 72)
-    print("VERDICT")
+    print("CONTRAST with train.py reporting")
     print("=" * 72)
-    if unit_class == "normalised":
-        # Could be metres or normalised pixels. Both store data in [-1, 1]-ish
-        # range, so we can't disambiguate from value range alone. The
-        # MotionBERT/MotionAGFormer h36m cam-source pkls store METRES root-
-        # relative, in which case (B) IS millimetres.
-        print(f"  Storage values fit the [-1, +1] envelope. Two possibilities:")
-        print(f"    · MotionBERT/MotionAGFormer convention (camera-space metres,")
-        print(f"      root-relative): then \033[1m{convention_mpjpe:.2f} mm\033[0m IS the real MPJPE.")
-        print(f"    · Image-pixel normalisation (joint3d_image / res_w · 2):")
-        print(f"      then × 1000 is NOT mm; needs camera deprojection.")
-        print()
-        print(f"  How to disambiguate:")
-        print(f"    1. Check the data preprocessing script that built")
-        print(f"       {cfg.data_root}{os.sep}{cfg.subset_list[0]}{os.sep}test{os.sep}")
-        print(f"       — if it called `joint_cam / 1000.0` or similar before saving,")
-        print(f"       you're in metres → (B) is correct mm.")
-        print(f"    2. Independently: a *typical* H3.6M MPJPE for a competitive")
-        print(f"       lifter with CPN 2D is 38–50 mm. If (B) gives 30–60, the")
-        print(f"       convention is consistent. If (B) gives 5 or 500, something")
-        print(f"       is off by a factor of 100×.")
-    elif unit_class == "millimetres":
-        print(f"  Storage is already in mm. The real MPJPE is \033[1m{raw_mpjpe:.2f} mm\033[0m.")
-        print(f"  train.py's × 1000 over-scales by 1000× — its 'mm' label is wrong.")
-    elif unit_class == "pixels":
-        print(f"  Storage is in pixel space. (B) = {convention_mpjpe:.2f} is NOT mm.")
-        print(f"  Need camera intrinsics to deproject before reporting MPJPE.")
+    print(f"  train.py best_mpjpe (raw)        = {ckpt.get('best_mpjpe', '?')}")
+    print(f"  train.py 'mm' (× 1000)            = {float(ckpt.get('best_mpjpe', 0.0)) * 1000:.2f}")
+    print(f"  Proper MPJPE (mm camera-space)   = {e1:.2f}")
+    ratio = e1 / max(1e-9, float(ckpt.get('best_mpjpe', 1e-9)) * 1000)
+    print(f"  Ratio (proper / train.py-shown)  = {ratio:.3f}")
+    print()
+    if abs(ratio - 1.0) < 0.05:
+        print("  → train.py 'mm' is approximately correct (within 5%).")
     else:
-        print(f"  Could not auto-classify. Inspect the per-channel stats above and")
-        print(f"  cross-reference with the dataset preprocessing pipeline.")
-    print()
-    print(f"  train.py reported best_mpjpe = {ckpt.get('best_mpjpe', '?')}")
-    print(f"  This sweep raw mean         = {raw_mpjpe:.6f}")
-    print(f"  Difference (should be ~0)   = "
-          f"{abs(float(ckpt.get('best_mpjpe', 0.0)) - raw_mpjpe):.6f}")
-    print()
+        print(f"  → train.py 'mm' is OFF by ~{abs(ratio - 1) * 100:.0f}%.")
+        print(f"     The headline number for the paper should be {e1:.2f} mm, "
+              f"NOT {float(ckpt.get('best_mpjpe', 0)) * 1000:.2f} mm.")
 
 
 if __name__ == "__main__":

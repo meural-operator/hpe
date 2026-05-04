@@ -36,15 +36,19 @@ if PROJECT_ROOT not in sys.path:
 
 from model.network import HyperbolicHPE
 from data.reader.motion_dataset import MotionDataset3D
+from data.reader.h36m import DataReaderH36M
 from utils.learning import (
     decay_lr_exponentially, build_cosine_warmup_scheduler, AverageMeter,
 )
 from utils.tools import set_random_seed
 from loss.pose3d import loss_mpjpe
+from loss.pose3d import mpjpe as calculate_mpjpe
+from loss.pose3d import p_mpjpe as calculate_p_mpjpe
 from loss.hyperbolic_loss import (
     geodesic_velocity_loss, geodesic_bone_loss,
     manifold_drift_loss, UncertaintyWeightedLoss,
 )
+import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RunManager
@@ -426,38 +430,104 @@ def train_one_epoch(opts, args, model, loss_weighter, dataloader,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Evaluation
+# Evaluation — True-mm MotionAGFormer protocol
 # ─────────────────────────────────────────────────────────────────────────────
-def evaluate(opts, args, model, dataloader, device, epoch, rm: RunManager):
+def evaluate(opts, args, model, dataloader, datareader, device, epoch, rm: RunManager):
+    """Evaluate using the standard H3.6M protocol:
+       denormalize → apply 2.5d_factor → root-relative → MPJPE/P-MPJPE in mm.
+    """
     model.eval()
-    topo_bias   = generate_topology_matrix(args.num_joints, device)
-    mpjpe_meter = AverageMeter()
+    topo_bias = generate_topology_matrix(args.num_joints, device)
 
     eval_pbar = tqdm(dataloader,
                      desc=f"  Ep {epoch:03d} [eval] ",
                      unit="batch", leave=False,
                      dynamic_ncols=True, colour="yellow")
 
+    # Collect all predictions in normalized space
+    results_all = []
     with torch.no_grad():
         for x, y in eval_pbar:
-            B = x.shape[0]
-            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+            x = x.to(device, non_blocking=True)
             x_vel = compute_kinematics(x)
             pred  = model(x, x_vel, topo_bias)
 
             if args.root_rel:
-                pred = pred - pred[..., 0:1, :]
-                y    = y    - y[..., 0:1, :]
+                pred[:, :, 0, :] = 0  # Zero root (same convention as MotionAGFormer)
 
-            mpjpe_meter.update(loss_mpjpe(pred, y).item(), B)
-            eval_pbar.set_postfix(mpjpe=_fmt(mpjpe_meter.avg))
+            results_all.append(pred.cpu().numpy())
 
     eval_pbar.close()
+    results_all = np.concatenate(results_all)
+
+    # Denormalize predictions (reverse /res_w * 2)
+    results_all = datareader.denormalize(results_all)
+
+    # Load GT metadata from the raw pickle
+    _, split_id_test = datareader.get_split_id()
+    actions = np.array(datareader.dt_dataset['test']['action'])
+    factors = np.array(datareader.dt_dataset['test']['2.5d_factor'])
+    gts     = np.array(datareader.dt_dataset['test']['joints_2.5d_image'])
+    sources = np.array(datareader.dt_dataset['test']['source'])
+
+    num_test_frames = len(actions)
+    frames = np.array(range(num_test_frames))
+    action_clips = actions[split_id_test]
+    factor_clips = factors[split_id_test]
+    source_clips = sources[split_id_test]
+    frame_clips  = frames[split_id_test]
+    gt_clips     = gts[split_id_test]
+
+    e1_all = np.zeros(num_test_frames)
+    e2_all = np.zeros(num_test_frames)
+    oc     = np.zeros(num_test_frames)
+
+    block_list = ['s_09_act_05_subact_02',
+                  's_09_act_10_subact_02',
+                  's_09_act_13_subact_01']
+
+    results_by_action = {}
+    results_p_by_action = {}
+    action_names = sorted(set(datareader.dt_dataset['test']['action']))
+    for a in action_names:
+        results_by_action[a] = []
+        results_p_by_action[a] = []
+
+    for idx in range(len(action_clips)):
+        source = source_clips[idx][0][:-6]
+        if source in block_list:
+            continue
+        frame_list = frame_clips[idx]
+        action = action_clips[idx][0]
+        factor = factor_clips[idx][:, None, None]
+        gt   = gt_clips[idx]
+        pred = results_all[idx]
+        pred *= factor
+
+        pred = pred - pred[:, 0:1, :]
+        gt   = gt   - gt[:, 0:1, :]
+
+        err1 = calculate_mpjpe(pred, gt)
+        err2 = calculate_p_mpjpe(pred, gt)
+        e1_all[frame_list] += err1
+        e2_all[frame_list] += err2
+        oc[frame_list] += 1
+
+    for idx in range(num_test_frames):
+        if e1_all[idx] > 0:
+            action = actions[idx]
+            results_by_action[action].append(e1_all[idx] / oc[idx])
+            results_p_by_action[action].append(e2_all[idx] / oc[idx])
+
+    e1 = np.mean([np.mean(results_by_action[a]) for a in action_names])
+    e2 = np.mean([np.mean(results_p_by_action[a]) for a in action_names])
 
     if opts.use_wandb:
-        wandb.log({"eval_epoch/mpjpe": mpjpe_meter.avg, "epoch": epoch + 1})
+        wandb.log({"eval_epoch/mpjpe_mm": e1,
+                   "eval_epoch/p_mpjpe_mm": e2,
+                   "epoch": epoch + 1})
 
-    return mpjpe_meter.avg
+    return e1, e2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -513,6 +583,16 @@ def main():
     test_loader   = DataLoader(test_dataset,  batch_size=args.batch_size,
                                shuffle=False, num_workers=0,
                                pin_memory=True)
+
+    # ── DataReaderH36M for proper mm-scale evaluation ────────────────────────
+    dt_file = getattr(args, 'dt_file', 'h36m_sh_conf_cam_source_final.pkl')
+    datareader = DataReaderH36M(
+        n_frames=args.n_frames, sample_stride=1,
+        data_stride_train=args.n_frames // 3,
+        data_stride_test=args.n_frames,
+        dt_root=args.data_root, dt_file=dt_file,
+    )
+    rm.log(f"DataReaderH36M loaded (dt_file={dt_file}) for true-mm evaluation")
 
     # ── Model ─────────────────────────────────────────────────────────────────
     # Prefer multi-scale `temporal_windows` if present; else fall back to legacy
@@ -608,9 +688,9 @@ def main():
             scaler=scaler, lr_scheduler=lr_scheduler,
         )
 
-        # Evaluate
-        eval_mpjpe = evaluate(opts, args, model, test_loader,
-                              device, epoch, rm)
+        # Evaluate (true mm via MotionAGFormer protocol)
+        eval_mpjpe, eval_p_mpjpe = evaluate(opts, args, model, test_loader,
+                                            datareader, device, epoch, rm)
 
         elapsed = time.time() - t0
         is_best = eval_mpjpe < best_mpjpe
@@ -621,40 +701,40 @@ def main():
         # train_one_epoch so we just observe wherever it landed.
         lr = optimizer.param_groups[0]["lr"]
 
-        # ── Epoch postfix (outer bar) — all MPJPE in mm ──────────────────────
+        # ── Epoch postfix (outer bar) — true mm from MotionAGFormer protocol ─
         epoch_pbar.set_postfix(OrderedDict(
-            tr_mm = _fmt(meters["mpjpe"].avg * 1000, 1),
-            ev_mm = _fmt(eval_mpjpe * 1000, 1),
-            best_mm = _fmt(best_mpjpe * 1000, 1),
-            lr    = f"{lr:.2e}",
-            t     = f"{elapsed:.0f}s",
+            ev_mm   = _fmt(eval_mpjpe, 1),
+            p_mm    = _fmt(eval_p_mpjpe, 1),
+            best_mm = _fmt(best_mpjpe, 1),
+            lr      = f"{lr:.2e}",
+            t       = f"{elapsed:.0f}s",
         ))
 
-        # ── Text log — MPJPE in mm ────────────────────────────────────────────
+        # ── Text log — true mm ────────────────────────────────────────────────
         rm.log(
             f"Epoch {epoch:03d}/{args.epochs-1} | "
             f"Loss {meters['total'].avg:.4f} | "
-            f"MPJPE {meters['mpjpe'].avg*1000:.1f}mm | "
             f"Vel {meters['vel'].avg:.4f} | "
             f"Bone {meters['bone'].avg:.4f} | "
             f"Drift(log10) {torch.log10(torch.tensor(meters['drift'].avg+1e-9)).item():.2f} | "
-            f"Eval {eval_mpjpe*1000:.1f}mm | "
-            f"Best {best_mpjpe*1000:.1f}mm | "
+            f"Eval {eval_mpjpe:.1f}mm | "
+            f"P-MPJPE {eval_p_mpjpe:.1f}mm | "
+            f"Best {best_mpjpe:.1f}mm | "
             f"LR {lr:.2e} | "
             f"{elapsed:.1f}s"
             + (" \u2605 NEW BEST" if is_best else "")
         )
 
-        # ── CSV log — store raw meters (meters), display col in mm ─────────────
+        # ── CSV log — true mm ─────────────────────────────────────────────────
         rm.append_csv({
             "epoch":              epoch,
             "train_loss_total":   meters["total"].avg,
-            "train_mpjpe_mm":     meters["mpjpe"].avg * 1000,
             "train_vel":          meters["vel"].avg,
             "train_bone":         meters["bone"].avg,
             "train_log10_drift":  torch.log10(torch.tensor(meters["drift"].avg + 1e-9)).item(),
-            "eval_mpjpe_mm":      eval_mpjpe * 1000,
-            "best_mpjpe_mm":      best_mpjpe * 1000,
+            "eval_mpjpe_mm":      eval_mpjpe,
+            "eval_p_mpjpe_mm":    eval_p_mpjpe,
+            "best_mpjpe_mm":      best_mpjpe,
             "lr":                 lr,
             "elapsed_sec":        elapsed,
             "is_best":            int(is_best),
@@ -664,8 +744,8 @@ def main():
         state = rm.build_state(
             epoch, model, optimizer, loss_weighter, lr, best_mpjpe, args,
             metrics={
-                "train_mpjpe_mm": meters["mpjpe"].avg * 1000,
-                "eval_mpjpe_mm":  eval_mpjpe * 1000,
+                "eval_mpjpe_mm":   eval_mpjpe,
+                "eval_p_mpjpe_mm": eval_p_mpjpe,
             },
         )
         state["scaler_state_dict"] = scaler.state_dict()  # for AMP resume
@@ -685,18 +765,18 @@ def main():
         # ── W&B epoch log ─────────────────────────────────────────────────────
         if opts.use_wandb:
             wandb.log({
-                "epoch/train_loss":  meters["total"].avg,
-                "epoch/train_mpjpe": meters["mpjpe"].avg,
-                "epoch/eval_mpjpe":  eval_mpjpe,
-                "epoch/best_mpjpe":  best_mpjpe,
-                "epoch/lr":          lr,
-                "epoch/elapsed_sec": elapsed,
+                "epoch/train_loss":    meters["total"].avg,
+                "epoch/eval_mpjpe_mm": eval_mpjpe,
+                "epoch/eval_p_mpjpe_mm": eval_p_mpjpe,
+                "epoch/best_mpjpe_mm": best_mpjpe,
+                "epoch/lr":            lr,
+                "epoch/elapsed_sec":   elapsed,
                 "epoch": epoch,
             })
 
     # ── Done ──────────────────────────────────────────────────────────────────
     epoch_pbar.close()
-    rm.log(f"Training complete. Best eval MPJPE: {best_mpjpe:.4f}")
+    rm.log(f"Training complete. Best eval MPJPE: {best_mpjpe:.1f} mm")
     rm.log(f"Run artifacts at: {rm.run_dir}")
 
     if opts.use_wandb:
