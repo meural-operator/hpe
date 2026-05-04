@@ -1,0 +1,46 @@
+# True Hyperbolic HPE v4 — Fully Lorentz Architecture
+# All operations on the Lorentz manifold H^d (rotation + boost)
+# Based on: Chen et al. 2022 (FHNN), Hypformer (KDD 2024)
+
+# Training
+learning_rate: 0.0005
+batch_size: 16
+weight_decay: 0.01
+lr_decay: 0.99
+epochs: 60
+warmup_epochs: 5
+min_lr_ratio: 0.01
+grad_clip: 1.0
+
+# Loss curriculum
+loss_curriculum_start: 10
+loss_curriculum_end: 20
+
+# Train-time augmentation
+joint_conf_dropout_p: 0.2
+
+# Model
+model_version: v4
+embed_dim: 128
+n_layers: 12
+num_heads: 8
+mlp_ratio: 4
+dropout: 0.1
+
+# Legacy compat (ignored by v4 but needed for MotionDataset3D)
+num_spatial: 12
+num_temporal: 12
+temporal_window: 3
+temporal_windows: null
+
+# Data
+data_root: C:/Users/DIAT/ashish/hpe/steins_shrinkage/MotionAGFormer/data/motion3d/
+subset_list: [ H36M-243 ]
+num_joints: 17
+root_rel: True
+add_velocity: False
+n_frames: 243
+
+# Augmentation
+use_proj_as_2d: False
+flip: True

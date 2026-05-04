@@ -35,6 +35,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from model.network import HyperbolicHPE
+from model.lorentz_network import LorentzHPE
 from data.reader.motion_dataset import MotionDataset3D
 from data.reader.h36m import DataReaderH36M
 from utils.learning import (
@@ -595,22 +596,32 @@ def main():
     rm.log(f"DataReaderH36M loaded (dt_file={dt_file}) for true-mm evaluation")
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    # Prefer multi-scale `temporal_windows` if present; else fall back to legacy
-    # scalar `temporal_window`.
-    temporal_windows = args.get("temporal_windows", None) if hasattr(args, "get") \
-        else getattr(args, "temporal_windows", None)
-    model = HyperbolicHPE(
-        in_features      = 3,
-        embed_dim        = args.embed_dim,
-        num_spatial      = args.num_spatial,
-        num_temporal     = args.num_temporal,
-        num_heads        = getattr(args, "num_heads", 8),
-        temporal_window  = args.temporal_window,
-        temporal_windows = temporal_windows,
-        mlp_ratio        = args.mlp_ratio,
-        dropout          = args.dropout,
-        num_joints       = args.num_joints,
-    ).to(device)
+    model_version = getattr(args, 'model_version', 'v3')
+    if model_version == 'v4':
+        model = LorentzHPE(
+            in_features = 3,
+            embed_dim   = args.embed_dim,
+            n_layers    = getattr(args, 'n_layers', 12),
+            num_heads   = getattr(args, 'num_heads', 8),
+            mlp_ratio   = args.mlp_ratio,
+            dropout     = args.dropout,
+            num_joints  = args.num_joints,
+        ).to(device)
+    else:
+        temporal_windows = args.get("temporal_windows", None) if hasattr(args, "get") \
+            else getattr(args, "temporal_windows", None)
+        model = HyperbolicHPE(
+            in_features      = 3,
+            embed_dim        = args.embed_dim,
+            num_spatial      = args.num_spatial,
+            num_temporal     = args.num_temporal,
+            num_heads        = getattr(args, "num_heads", 8),
+            temporal_window  = args.temporal_window,
+            temporal_windows = temporal_windows,
+            mlp_ratio        = args.mlp_ratio,
+            dropout          = args.dropout,
+            num_joints       = args.num_joints,
+        ).to(device)
 
     loss_weighter = UncertaintyWeightedLoss(4).to(device)
 
@@ -625,13 +636,12 @@ def main():
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         loss_weighter.load_state_dict(ckpt["loss_weighter_state_dict"])
-        # Push optimizer LR to the resumed value
         for pg in optimizer.param_groups:
             pg["lr"] = lr
         rm.log("Model / optimizer / loss-weighter states restored.")
 
     n_params = sum(p.numel() for p in model.parameters())
-    rm.log(f"HyperbolicHPE v2 | Parameters: {n_params:,}")
+    rm.log(f"{'LorentzHPE v4' if model_version == 'v4' else 'HyperbolicHPE v3'} | Parameters: {n_params:,}")
     rm.log(f"Epochs: {start_epoch} → {args.epochs - 1} | "
            f"LR: {lr:.2e} | Batch: {args.batch_size}")
 
